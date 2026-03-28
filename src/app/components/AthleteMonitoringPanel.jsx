@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { AlertTriangle, CheckCircle, Activity, ShieldAlert } from 'lucide-react';
 import { calculateAcwr, detectOvertraining, analyzePerformanceDegradation, predictInjuryRisk, calculateReadinessScore } from '../utils/athleteMonitoringUtils';
-import { getAISuggestions } from '../utils/aiInsights';
 import { getMLPredictions } from '../utils/mlService';
 
 function metricCard({ title, value, unit = '', status = null, color = 'bg-blue-500' }) {
@@ -33,9 +32,6 @@ export function AthleteMonitoringPanel({ wearableData = [], performanceData = []
   const degradation = useMemo(() => analyzePerformanceDegradation(performanceData), [performanceData]);
   const injury = useMemo(() => predictInjuryRisk(wearableData), [wearableData]);
   const readiness = useMemo(() => calculateReadinessScore(wearableData, performanceData), [wearableData, performanceData]);
-
-  const [suggestions, setSuggestions] = useState('');
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [mlPrediction, setMlPrediction] = useState(null);
   const [mlError, setMlError] = useState('');
 
@@ -104,27 +100,6 @@ export function AthleteMonitoringPanel({ wearableData = [], performanceData = []
     return typeof v === 'number' ? `Model overtraining risk: ${Math.round(v)}%` : `Model overtraining risk: ${String(v)}`;
   }, [mlPrediction]);
 
-  useEffect(() => {
-    async function load() {
-      setLoadingSuggestions(true);
-
-      const latest = wearableData?.[wearableData.length - 1] || {};
-      const aiText = await getAISuggestions({
-        acwr,
-        performanceDrop: degradation.changePct || 0,
-        recoveryScore: Number(latest.recovery_score ?? 100),
-        stressLevel: Number(latest.stress_level ?? 0),
-      });
-
-      setSuggestions(aiText);
-      setLoadingSuggestions(false);
-    }
-
-    if (wearableData?.length) {
-      load();
-    }
-  }, [wearableData, acwr, degradation.changePct, injury.level, readiness]);
-
   const chartData = useMemo(() => {
     return wearableData.map((item) => ({
       date: item.date,
@@ -178,16 +153,6 @@ export function AthleteMonitoringPanel({ wearableData = [], performanceData = []
               <Line type="monotone" dataKey="recovery" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
             </LineChart>
           </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="dark:text-white">AI Suggestions</h3>
-          {loadingSuggestions ? <span className="text-sm text-gray-500">Loading...</span> : null}
-        </div>
-        <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-          {loadingSuggestions ? 'Generating detailed plan...' : suggestions || 'Awaiting AI suggestions...'}
         </div>
       </div>
     </section>
