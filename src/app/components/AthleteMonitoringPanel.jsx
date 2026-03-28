@@ -3,16 +3,26 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { AlertTriangle, CheckCircle, Activity, ShieldAlert } from 'lucide-react';
 import { calculateAcwr, detectOvertraining, analyzePerformanceDegradation, predictInjuryRisk, calculateReadinessScore } from '../utils/athleteMonitoringUtils';
 import { getAISuggestions } from '../utils/aiInsights';
+import { getMLPredictions } from '../utils/mlService';
 
 function metricCard({ title, value, unit = '', status = null, color = 'bg-blue-500' }) {
+  const valueText = String(value ?? '');
+  const compactValueClass = valueText.length > 12 ? 'text-2xl' : 'text-3xl';
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
       <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">{title}</div>
-      <div className="text-3xl font-semibold text-gray-900 dark:text-white">
+      <div className={`${compactValueClass} font-semibold text-gray-900 dark:text-white leading-tight`}>
         {value}
         {unit && <span className="text-base font-medium ml-1">{unit}</span>}
       </div>
-      {status && <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{status}</p>}
+      {status && (
+        <p
+          className="mt-2 text-sm text-gray-600 dark:text-gray-300 leading-snug"
+          style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+        >
+          {status}
+        </p>
+      )}
     </div>
   );
 }
@@ -26,6 +36,73 @@ export function AthleteMonitoringPanel({ wearableData = [], performanceData = []
 
   const [suggestions, setSuggestions] = useState('');
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [mlPrediction, setMlPrediction] = useState(null);
+  const [mlError, setMlError] = useState('');
+
+  const parseRiskScore = (value, fallback) => {
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      return Math.max(0, Math.min(100, Math.round(value)));
+    }
+
+    const normalized = String(value || '').toLowerCase();
+    if (normalized.includes('high')) return 80;
+    if (normalized.includes('medium') || normalized.includes('moderate')) return 55;
+    if (normalized.includes('low')) return 25;
+
+    return fallback;
+  };
+
+  const parseReadinessScore = (value, fallback) => {
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      return Math.max(0, Math.min(100, Math.round(value)));
+    }
+
+    const normalized = String(value || '').toLowerCase();
+    if (normalized.includes('high') || normalized.includes('ready') || normalized.includes('fit')) return 85;
+    if (normalized.includes('medium') || normalized.includes('moderate')) return 60;
+    if (normalized.includes('low') || normalized.includes('not')) return 35;
+
+    return fallback;
+  };
+
+  useEffect(() => {
+    async function loadML() {
+      try {
+        const latest = wearableData?.[wearableData.length - 1] || {};
+        const result = await getMLPredictions({
+          latest,
+          acwr,
+          performanceDrop: degradation.changePct || 0,
+          activity: 'Training',
+        });
+        setMlPrediction(result);
+        setMlError('');
+      } catch (error) {
+        setMlPrediction(null);
+        setMlError(error?.message || 'ML model unavailable');
+      }
+    }
+
+    if (wearableData?.length) {
+      loadML();
+    }
+  }, [wearableData, acwr, degradation.changePct]);
+
+  const displayedInjuryScore = useMemo(
+    () => (mlPrediction ? parseRiskScore(mlPrediction.injuryRisk, injury.score) : injury.score),
+    [mlPrediction, injury.score]
+  );
+
+  const displayedReadiness = useMemo(
+    () => (mlPrediction ? parseReadinessScore(mlPrediction.readinessStatus, readiness) : readiness),
+    [mlPrediction, readiness]
+  );
+
+  const mlOvertrainingText = useMemo(() => {
+    if (!mlPrediction) return '';
+    const v = mlPrediction.overtrainingRisk;
+    return typeof v === 'number' ? `Model overtraining risk: ${Math.round(v)}%` : `Model overtraining risk: ${String(v)}`;
+  }, [mlPrediction]);
 
   useEffect(() => {
     async function load() {
@@ -56,6 +133,11 @@ export function AthleteMonitoringPanel({ wearableData = [], performanceData = []
     }));
   }, [wearableData]);
 
+  const trendStatusText =
+    degradation.trend === 'Insufficient data'
+      ? 'Add at least 6 performance entries'
+      : `${degradation.changePct}% vs last week`;
+
   return (
     <section className="mb-8">
       <div className="flex items-center gap-2 mb-4">
@@ -64,11 +146,17 @@ export function AthleteMonitoringPanel({ wearableData = [], performanceData = []
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        {metricCard({ title: 'ACWR', value: acwr ?? 'N/A', unit: '', status: overtraining.message })}
-        {metricCard({ title: 'Performance Trend', value: degradation.trend, unit: '', status: `${degradation.changePct}% vs last week` })}
-        {metricCard({ title: 'Injury Risk', value: `${injury.score}`, unit: '%', status: injury.description })}
-        {metricCard({ title: 'Readiness Score', value: readiness, unit: '/100', status: 'Higher is better' })}
+        {metricCard({ title: 'ACWR', value: acwr ?? 'N/A', unit: '', status: mlOvertrainingText || overtraining.message })}
+        {metricCard({ title: 'Performance Trend', value: degradation.trend, unit: '', status: trendStatusText })}
+        {metricCard({ title: 'Injury Risk', value: `${displayedInjuryScore}`, unit: '%', status: mlPrediction ? 'Based on trained ML model' : injury.description })}
+        {metricCard({ title: 'Readiness Score', value: displayedReadiness, unit: '/100', status: mlPrediction ? 'Based on trained ML model' : 'Higher is better' })}
       </div>
+
+      {mlPrediction ? (
+        <p className="text-xs text-green-700 dark:text-green-300 mb-4">ML model is active for injury/readiness predictions.</p>
+      ) : mlError ? (
+        <p className="text-xs text-amber-700 dark:text-amber-300 mb-4">ML model fallback to rule-based logic: {mlError}</p>
+      ) : null}
 
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 mb-6">
         <h3 className="mb-4 dark:text-white">Training Load & Recovery Timeline</h3>

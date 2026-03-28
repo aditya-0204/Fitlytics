@@ -28,6 +28,7 @@ import { calculateAcuteLoad, calculateChronicLoad, calculateACWR } from './utils
 import { calculateBaseline, calculatePerformanceDrop } from './utils/performanceAnalysis';
 
 const getCoachTeamStorageKey = (coachUser) => `athleteDashboardTeamPlayers:${coachUser?.id || coachUser?.username || 'coach'}`;
+const DEFAULT_COACH_USER = { id: 'coach-1', username: 'coach' };
 
 const loadCoachTeamPlayers = (coachUser) => {
   if (!coachUser) {
@@ -47,6 +48,22 @@ const loadCoachTeamPlayers = (coachUser) => {
 
   // Keep demo coach experience unchanged; new signed-up coaches start empty.
   return coachUser.username === 'coach' ? teamPlayers : [];
+};
+
+const loadSharedTeamPlayersForPlayerView = () => {
+  try {
+    const key = getCoachTeamStorageKey(DEFAULT_COACH_USER);
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch {
+    return teamPlayers;
+  }
+  return teamPlayers;
 };
 
 export default function App() {
@@ -75,8 +92,8 @@ export default function App() {
       return;
     }
 
-    // Players use the seeded dataset + potential default fallback.
-    setCurrentTeamPlayers(teamPlayers);
+    // Player view reads shared team data so coach updates are visible.
+    setCurrentTeamPlayers(loadSharedTeamPlayersForPlayerView());
   }, [user]);
 
   useEffect(() => {
@@ -201,19 +218,19 @@ export default function App() {
   const currentUserPlayer = currentTeamPlayers.find(p => p.id === playerId);
 
   const healthMetrics = playerId
-    ? playerHealthMetrics[playerId] || currentUserPlayer?.healthMetrics || null
+    ? currentUserPlayer?.healthMetrics || playerHealthMetrics[playerId] || null
     : null;
   const recentActivities = playerId
-    ? playerActivities[playerId] || currentUserPlayer?.activities || []
+    ? currentUserPlayer?.activities || playerActivities[playerId] || []
     : [];
   const performanceData = playerId
-    ? playerPerformanceData[playerId] || currentUserPlayer?.performanceData || []
+    ? currentUserPlayer?.performanceData || playerPerformanceData[playerId] || []
     : [];
   const weeklyActivity = playerId
-    ? playerWeeklyActivity[playerId] || currentUserPlayer?.weeklyActivity || []
+    ? currentUserPlayer?.weeklyActivity || playerWeeklyActivity[playerId] || []
     : [];
   const riskFactors = playerId
-    ? playerRiskFactors[playerId] || currentUserPlayer?.riskFactors || []
+    ? currentUserPlayer?.riskFactors || playerRiskFactors[playerId] || []
     : [];
 
   const wearableData = playerId

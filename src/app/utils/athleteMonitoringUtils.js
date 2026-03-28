@@ -37,13 +37,14 @@ export function detectOvertraining(acwr) {
 }
 
 export function analyzePerformanceDegradation(performanceData) {
-  if (!performanceData?.length || performanceData.length < 14) {
+  if (!performanceData?.length || performanceData.length < 6) {
     return { trend: 'Insufficient data', changePct: 0 };
   }
 
   const sorted = [...performanceData].sort((a, b) => new Date(a.date) - new Date(b.date));
-  const last7 = sorted.slice(-7);
-  const prev7 = sorted.slice(-14, -7);
+  const windowSize = Math.min(7, Math.floor(sorted.length / 2));
+  const last7 = sorted.slice(-windowSize);
+  const prev7 = sorted.slice(-2 * windowSize, -windowSize);
 
   const last7Avg = average(last7.map((p) => Number(p.score) || 0));
   const prev7Avg = average(prev7.map((p) => Number(p.score) || 0));
@@ -83,14 +84,14 @@ export function predictInjuryRisk(wearableData) {
   riskScore = Math.max(0, Math.min(100, Math.round(riskScore)));
 
   let level = 'Low';
-  let description = 'Athlete appears well positioned; continue monitoring.';
+  let description = 'Low risk. Continue current plan and monitor daily.';
 
   if (riskScore >= 70) {
     level = 'High';
-    description = 'High risk; reduce intensity and monitor closely.';
+    description = 'High risk. Reduce intensity and monitor closely.';
   } else if (riskScore >= 45) {
     level = 'Medium';
-    description = 'Moderate risk; consider increased recovery and load management.';
+    description = 'Moderate risk. Increase recovery and manage load.';
   }
 
   return { score: riskScore, level, description };

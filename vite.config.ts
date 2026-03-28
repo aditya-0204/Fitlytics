@@ -1,5 +1,6 @@
 /// <reference types="node" />
 import { defineConfig, loadEnv } from 'vite'
+import { spawn } from 'node:child_process'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
@@ -17,6 +18,82 @@ export default defineConfig(({ command, mode }) => {
         name: 'gemini-ai-proxy',
         configureServer(server) {
           server.middlewares.use(async (req, res, next) => {
+            if (req.method === 'POST' && req.url === '/api/ml-predict') {
+              let body = ''
+              req.on('data', (chunk) => {
+                body += chunk
+              })
+              req.on('end', async () => {
+                try {
+                  const payload = JSON.parse(body || '{}')
+                  const scriptPath = path.resolve(process.cwd(), 'ml_predict_api.py')
+
+                  const pythonBin = env.PYTHON_BIN || 'python'
+                  const child = spawn(pythonBin, [scriptPath], {
+                    cwd: process.cwd(),
+                    stdio: ['pipe', 'pipe', 'pipe'],
+                  })
+
+                  let stdout = ''
+                  let stderr = ''
+
+                  child.stdout.on('data', (chunk) => {
+                    stdout += chunk.toString()
+                  })
+                  child.stderr.on('data', (chunk) => {
+                    stderr += chunk.toString()
+                  })
+
+                  child.stdin.write(JSON.stringify(payload))
+                  child.stdin.end()
+
+                  child.on('close', (code) => {
+                    try {
+                      if (code !== 0) {
+                        res.statusCode = 500
+                        res.setHeader('Content-Type', 'application/json')
+                        res.end(
+                          JSON.stringify({
+                            error: `ML prediction process failed (code ${code}). ${stderr || stdout || ''}`.trim(),
+                          })
+                        )
+                        return
+                      }
+
+                      const parsed = JSON.parse((stdout || '{}').trim())
+                      if (parsed?.error) {
+                        res.statusCode = 500
+                        res.setHeader('Content-Type', 'application/json')
+                        res.end(JSON.stringify({ error: parsed.error }))
+                        return
+                      }
+
+                      res.statusCode = 200
+                      res.setHeader('Content-Type', 'application/json')
+                      res.end(JSON.stringify(parsed))
+                    } catch (err) {
+                      res.statusCode = 500
+                      res.setHeader('Content-Type', 'application/json')
+                      res.end(
+                        JSON.stringify({
+                          error: `Unable to parse ML response: ${err instanceof Error ? err.message : String(err)}`,
+                        })
+                      )
+                    }
+                  })
+                } catch (error) {
+                  res.statusCode = 500
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(
+                    JSON.stringify({
+                      error: `ML endpoint error: ${error instanceof Error ? error.message : String(error)}`,
+                    })
+                  )
+                }
+              })
+              return
+            }
+
             if (req.method !== 'POST' || req.url !== '/api/ai-suggestions') {
               return next()
             }
