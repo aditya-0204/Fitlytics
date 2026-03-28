@@ -28,19 +28,72 @@ export default defineConfig(({ command, mode }) => {
             req.on('end', async () => {
               try {
                 const payload = JSON.parse(body || '{}')
-                const apiKey = env.VITE_OPENAI_API_KEY
+                const primaryApiKey = env.VITE_OPENAI_API_KEY || ''
+                const geminiApiKey =
+                  env.VITE_GEMINI_API_KEY || (primaryApiKey.startsWith('AIza') ? primaryApiKey : '')
+                const openaiApiKey =
+                  env.VITE_OPENAI_FALLBACK_API_KEY ||
+                  env.VITE_GPT_API_KEY ||
+                  (!primaryApiKey.startsWith('AIza') ? primaryApiKey : '')
 
-                if (!apiKey) {
+                if (!geminiApiKey && !openaiApiKey) {
                   res.statusCode = 500
                   res.setHeader('Content-Type', 'application/json')
-                  res.end(JSON.stringify({ error: 'Missing VITE_OPENAI_API_KEY in .env' }))
+                  res.end(
+                    JSON.stringify({
+                      error:
+                        'Missing API keys. Set VITE_GEMINI_API_KEY and/or VITE_OPENAI_API_KEY (or VITE_OPENAI_FALLBACK_API_KEY).',
+                    })
+                  )
                   return
                 }
 
                 const prompt = payload.prompt || ''
                 const model = payload.model || env.VITE_OPENAI_MODEL || 'gpt-4.1-mini'
-                const useGemini = apiKey.startsWith('AIza') || model.toLowerCase().startsWith('gemini-')
+                const useGemini =
+                  model.toLowerCase().startsWith('gemini-') || (!!geminiApiKey && !openaiApiKey)
                 let text = ''
+
+                const callOpenAI = async (fallbackReason = null) => {
+                  if (!openaiApiKey) {
+                    throw new Error(
+                      fallbackReason
+                        ? `${fallbackReason}. OpenAI fallback key not configured.`
+                        : 'OpenAI key not configured.'
+                    )
+                  }
+
+                  const openaiModel = model.toLowerCase().startsWith('gemini-')
+                    ? env.VITE_OPENAI_FALLBACK_MODEL || 'gpt-4.1-mini'
+                    : model
+                  const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${openaiApiKey}`,
+                    },
+                    body: JSON.stringify({
+                      model: openaiModel,
+                      messages: [
+                        {
+                          role: 'system',
+                          content:
+                            'Write clear and simple coaching language. Avoid jargon and long complex sentences.',
+                        },
+                        { role: 'user', content: prompt },
+                      ],
+                      max_tokens: 2200,
+                    }),
+                  })
+
+                  if (!openaiResponse.ok) {
+                    const errorText = await openaiResponse.text()
+                    throw new Error(`OpenAI API error ${openaiResponse.status}: ${errorText}`)
+                  }
+
+                  const openaiData = await openaiResponse.json()
+                  return openaiData?.choices?.[0]?.message?.content || ''
+                }
 
                 if (useGemini) {
                   const geminiModel = model.toLowerCase().startsWith('gemini-')
@@ -52,8 +105,8 @@ export default defineConfig(({ command, mode }) => {
                   )
 
                   const geminiUrls = candidateModels.flatMap((candidateModel) => [
-                    { url: `https://generativelanguage.googleapis.com/v1/models/${candidateModel}:generateContent?key=${apiKey}` },
-                    { url: `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:generateContent?key=${apiKey}` },
+                    { url: `https://generativelanguage.googleapis.com/v1/models/${candidateModel}:generateContent?key=${geminiApiKey}` },
+                    { url: `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:generateContent?key=${geminiApiKey}` },
                   ])
 
                   let geminiResponse = null
@@ -67,7 +120,7 @@ export default defineConfig(({ command, mode }) => {
                         contents: [{ role: 'user', parts: [{ text: prompt }] }],
                         generationConfig: {
                           temperature: 0.5,
-                          maxOutputTokens: 2200,
+                          maxOutputTokens: 3500,
                           candidateCount: 1,
                         },
                       }),
@@ -82,38 +135,16 @@ export default defineConfig(({ command, mode }) => {
                   }
 
                   if (!geminiResponse || !geminiResponse.ok) {
-                    throw new Error(`Gemini API failed for all tried models:\n${errors.join('\n')}`)
+                    text = await callOpenAI(`Gemini API failed for all tried models: ${errors.join(' | ')}`)
+                  } else {
+                    const geminiData = await geminiResponse.json()
+                    text = geminiData?.candidates?.[0]?.content?.parts
+                      ?.map((part) => part?.text || '')
+                      .join('\n')
+                      .trim() || ''
                   }
-
-                  const geminiData = await geminiResponse.json()
-                  text = geminiData?.candidates?.[0]?.content?.parts
-                    ?.map((part) => part?.text || '')
-                    .join('\n')
-                    .trim() || ''
                 } else {
-                  const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      Authorization: `Bearer ${apiKey}`,
-                    },
-                    body: JSON.stringify({
-                      model,
-                      messages: [
-                        { role: 'system', content: 'You are a helpful assistant who writes detailed paragraphs and bullet points for each section.' },
-                        { role: 'user', content: prompt },
-                      ],
-                      max_tokens: 1000,
-                    }),
-                  })
-
-                  if (!openaiResponse.ok) {
-                    const errorText = await openaiResponse.text()
-                    throw new Error(`OpenAI API error ${openaiResponse.status}: ${errorText}`)
-                  }
-
-                  const openaiData = await openaiResponse.json()
-                  text = openaiData?.choices?.[0]?.message?.content || ''
+                  text = await callOpenAI()
                 }
 
                 res.statusCode = 200

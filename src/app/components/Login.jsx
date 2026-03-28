@@ -88,7 +88,7 @@ export function Login({ onLogin, error, onShowSignup }) {
               onClick={onShowSignup}
               className="w-full border border-blue-600 text-blue-600 hover:bg-blue-50 py-3 px-4 rounded-lg transition-colors"
             >
-              Create Coach Account
+              Create Account
             </button>
           </form>
 

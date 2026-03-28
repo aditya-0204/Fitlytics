@@ -129,6 +129,46 @@ export default function App() {
     setSelectedPlayer((prev) => (prev && prev.id === updatedPlayer.id ? updatedPlayer : prev));
   };
 
+  const computedTeamPerformanceData = useMemo(() => {
+    const byDate = new Map();
+
+    currentTeamPlayers.forEach((player) => {
+      const sourceData = Array.isArray(player.performanceData) && player.performanceData.length > 0
+        ? player.performanceData
+        : (playerPerformanceData[player.id] || []);
+
+      if (sourceData.length > 0) {
+        sourceData.forEach((entry) => {
+          const date = entry?.date;
+          const score = Number(entry?.score);
+          if (!date || Number.isNaN(score)) {
+            return;
+          }
+          const existing = byDate.get(date) || { total: 0, count: 0 };
+          existing.total += score;
+          existing.count += 1;
+          byDate.set(date, existing);
+        });
+      } else if (player?.stats?.performanceScore !== undefined) {
+        const today = new Date().toISOString().split('T')[0];
+        const score = Number(player.stats.performanceScore);
+        if (!Number.isNaN(score)) {
+          const existing = byDate.get(today) || { total: 0, count: 0 };
+          existing.total += score;
+          existing.count += 1;
+          byDate.set(today, existing);
+        }
+      }
+    });
+
+    return Array.from(byDate.entries())
+      .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
+      .map(([date, data]) => ({
+        date,
+        score: Math.round(data.total / data.count),
+      }));
+  }, [currentTeamPlayers]);
+
   // If not authenticated, show login
   if (!user) {
     return (
@@ -180,45 +220,6 @@ export default function App() {
     ? playerWearableData[playerId] || currentUserPlayer?.wearableData || []
     : [];
 
-  const computedTeamPerformanceData = useMemo(() => {
-    const byDate = new Map();
-
-    currentTeamPlayers.forEach((player) => {
-      const sourceData = Array.isArray(player.performanceData) && player.performanceData.length > 0
-        ? player.performanceData
-        : (playerPerformanceData[player.id] || []);
-
-      if (sourceData.length > 0) {
-        sourceData.forEach((entry) => {
-          const date = entry?.date;
-          const score = Number(entry?.score);
-          if (!date || Number.isNaN(score)) {
-            return;
-          }
-          const existing = byDate.get(date) || { total: 0, count: 0 };
-          existing.total += score;
-          existing.count += 1;
-          byDate.set(date, existing);
-        });
-      } else if (player?.stats?.performanceScore !== undefined) {
-        const today = new Date().toISOString().split('T')[0];
-        const score = Number(player.stats.performanceScore);
-        if (!Number.isNaN(score)) {
-          const existing = byDate.get(today) || { total: 0, count: 0 };
-          existing.total += score;
-          existing.count += 1;
-          byDate.set(today, existing);
-        }
-      }
-    });
-
-    return Array.from(byDate.entries())
-      .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
-      .map(([date, data]) => ({
-        date,
-        score: Math.round(data.total / data.count),
-      }));
-  }, [currentTeamPlayers]);
   const avgHealthScore = currentTeamPlayers.length > 0
     ? Math.round(currentTeamPlayers.reduce((sum, player) => sum + (player.stats?.healthScore || 0), 0) / currentTeamPlayers.length)
     : 0;
