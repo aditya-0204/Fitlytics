@@ -4,7 +4,7 @@ import { ActivityCard } from './ActivityCard';
 import { PerformanceChart } from './PerformanceChart';
 import { RiskAnalysisCard } from './RiskAnalysisCard';
 import { AIInsights } from './AIInsights';
-import { getAISuggestions } from '../utils/aiInsights';
+import { getAISuggestions, getAIRiskAndSafetyInsights } from '../utils/aiInsights';
 import {
   playerHealthMetrics,
   playerActivities,
@@ -159,6 +159,23 @@ export function PlayerDetailModal({ player, onClose }) {
     yPosition += 3;
 
     // Health Metrics
+    let aiRiskAndSafety = null;
+    try {
+      aiRiskAndSafety = await getAIRiskAndSafetyInsights({
+        hydration: healthMetrics.hydration.value ?? 0,
+        stress: healthMetrics.stress.value ?? 0,
+        trainingLoad: healthMetrics.trainingLoad.value ?? 0,
+        calories: healthMetrics.calories.value ?? 0,
+        heartRate: healthMetrics.heartRate.value ?? 0,
+        sleep: healthMetrics.sleep.value ?? 0,
+        recovery: healthMetrics.recovery.value ?? 0,
+        vo2Max: healthMetrics.vo2Max.value ?? 0,
+        riskFactors,
+      });
+    } catch (error) {
+      console.error('Failed to fetch AI risk/safety sections for PDF:', error);
+    }
+
     addSectionHeader('HEALTH METRICS (CURRENT VALUES)');
     pdf.setFontSize(10);
     pdf.setFont(undefined, 'bold');
@@ -180,18 +197,28 @@ export function PlayerDetailModal({ player, onClose }) {
     yPosition += 5;
     pdf.setFont(undefined, 'normal');
 
-    const additionalMetrics = [
+    const additionalMetricsFallback = [
       `Hydration Level: ${healthMetrics.hydration.value}% (${getTrendIndicator(healthMetrics.hydration.trend)} ${getTrendValue(healthMetrics.hydration.trend)})`,
       `Stress Level: ${healthMetrics.stress.value}/100 (${getTrendIndicator(healthMetrics.stress.trend)} ${getTrendValue(healthMetrics.stress.trend)})`,
       `Training Load: ${healthMetrics.trainingLoad.value} AU (${getTrendIndicator(healthMetrics.trainingLoad.trend)} ${getTrendValue(healthMetrics.trainingLoad.trend)})`,
       `Daily Calories: ${healthMetrics.calories.value} kcal (${getTrendIndicator(healthMetrics.calories.trend)} ${getTrendValue(healthMetrics.calories.trend)})`,
     ];
+    const additionalMetrics = aiRiskAndSafety?.metricsSnapshot?.length > 0
+      ? aiRiskAndSafety.metricsSnapshot
+      : additionalMetricsFallback;
     additionalMetrics.forEach(metric => addText(`  • ${metric}`, 9));
     yPosition += 3;
 
     // Risk Analysis
     addSectionHeader('RISK ANALYSIS & SAFETY CONSIDERATIONS');
-    if (riskFactors.length > 0) {
+    const aiRiskAnalysis = aiRiskAndSafety?.riskAnalysis || [];
+    if (aiRiskAnalysis.length > 0) {
+      aiRiskAnalysis.forEach(risk => {
+        const riskLevel = risk.level || 'UNKNOWN';
+        const riskIcon = riskLevel === 'HIGH' ? '⚠' : riskLevel === 'MEDIUM' ? '⚡' : 'ℹ';
+        addText(`${riskIcon} ${risk.factor || 'Unknown Risk'} - ${riskLevel}`, 9, true);
+      });
+    } else if (riskFactors.length > 0) {
       riskFactors.forEach(risk => {
         const riskLevel = risk.level || 'Unknown';
         const riskIcon = riskLevel === 'High' ? '⚠' : riskLevel === 'Medium' ? '⚡' : 'ℹ';
@@ -209,26 +236,31 @@ export function PlayerDetailModal({ player, onClose }) {
     yPosition += 5;
     pdf.setFont(undefined, 'normal');
 
-    riskFactors.forEach(risk => {
-      const riskFactor = risk.factor || 'Unknown risk';
-      const riskLevel = risk.level || 'unknown';
-      
-      let tip = '';
-      if (riskFactor.toLowerCase().includes('heart rate') || riskFactor.toLowerCase().includes('injury')) {
-        tip = `Monitor closely and avoid high-impact activities. Consult medical staff.`;
-      } else if (riskFactor.toLowerCase().includes('stress') || riskFactor.toLowerCase().includes('fatigue') || riskFactor.toLowerCase().includes('sleep')) {
-        tip = `Reduce training intensity, prioritize rest and recovery.`;
-      } else if (riskFactor.toLowerCase().includes('training') || riskFactor.toLowerCase().includes('overtraining')) {
-        tip = `Implement recovery protocols and monitor for burnout.`;
-      } else {
-        tip = `Monitor condition and adjust training accordingly.`;
-      }
-      addText(`  • ${riskFactor}: ${tip}`, 8);
-    });
+    if (aiRiskAndSafety?.safetyTips?.length > 0) {
+      aiRiskAndSafety.safetyTips.forEach((tip) => {
+        addText('  • ' + tip, 8);
+      });
+    } else {
+      riskFactors.forEach(risk => {
+        const riskFactor = risk.factor || 'Unknown risk';
 
-    if (riskFactors.length === 0) {
-      addText('  • Continue monitoring all health metrics regularly', 8);
-      addText('  • Maintain current training protocols', 8);
+        let tip = '';
+        if (riskFactor.toLowerCase().includes('heart rate') || riskFactor.toLowerCase().includes('injury')) {
+          tip = 'Monitor closely and avoid high-impact activities. Consult medical staff.';
+        } else if (riskFactor.toLowerCase().includes('stress') || riskFactor.toLowerCase().includes('fatigue') || riskFactor.toLowerCase().includes('sleep')) {
+          tip = 'Reduce training intensity, prioritize rest and recovery.';
+        } else if (riskFactor.toLowerCase().includes('training') || riskFactor.toLowerCase().includes('overtraining')) {
+          tip = 'Implement recovery protocols and monitor for burnout.';
+        } else {
+          tip = 'Monitor condition and adjust training accordingly.';
+        }
+        addText('  • ' + riskFactor + ': ' + tip, 8);
+      });
+
+      if (riskFactors.length === 0) {
+        addText('  • Continue monitoring all health metrics regularly', 8);
+        addText('  • Maintain current training protocols', 8);
+      }
     }
     yPosition += 3;
 
@@ -512,3 +544,7 @@ export function PlayerDetailModal({ player, onClose }) {
     </div>
   );
 }
+
+
+
+

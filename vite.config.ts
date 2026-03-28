@@ -47,28 +47,29 @@ export default defineConfig(({ command, mode }) => {
                     ? model
                     : 'gemini-2.5-flash'
 
-                  const candidateModels = [geminiModel]
-                  if (!model.toLowerCase().startsWith('gemini-') && geminiModel !== 'gemini-1.5-flash') {
-                    candidateModels.push('gemini-1.5-flash')
-                  }
+                  const candidateModels = Array.from(
+                    new Set([geminiModel, 'gemini-2.5-flash', 'gemini-2.5', 'gemini-1.5-flash', 'gemini-1.5'])
+                  )
 
                   const geminiUrls = candidateModels.flatMap((candidateModel) => [
-                    `https://generativelanguage.googleapis.com/v1/models/${candidateModel}:generate?key=${apiKey}`,
-                    `https://generativelanguage.googleapis.com/v1beta2/models/${candidateModel}:generate?key=${apiKey}`,
+                    { url: `https://generativelanguage.googleapis.com/v1/models/${candidateModel}:generateContent?key=${apiKey}` },
+                    { url: `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:generateContent?key=${apiKey}` },
                   ])
 
                   let geminiResponse = null
-                  let lastError = null
+                  const errors = []
 
-                  for (const url of geminiUrls) {
-                    geminiResponse = await fetch(url, {
+                  for (const config of geminiUrls) {
+                    geminiResponse = await fetch(config.url, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
-                        prompt: { text: prompt },
-                        temperature: 0.4,
-                        maxOutputTokens: 1200,
-                        candidateCount: 1,
+                        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                        generationConfig: {
+                          temperature: 0.5,
+                          maxOutputTokens: 2200,
+                          candidateCount: 1,
+                        },
                       }),
                     })
 
@@ -77,18 +78,18 @@ export default defineConfig(({ command, mode }) => {
                     }
 
                     const errorText = await geminiResponse.text()
-                    lastError = `Gemini API error ${geminiResponse.status} at ${url}: ${errorText}`
-                    if (geminiResponse.status === 404) {
-                      continue
-                    }
+                    errors.push(`(${geminiResponse.status}) ${config.url} -> ${errorText}`)
                   }
 
                   if (!geminiResponse || !geminiResponse.ok) {
-                    throw new Error(lastError || 'Gemini API error: unknown response')
+                    throw new Error(`Gemini API failed for all tried models:\n${errors.join('\n')}`)
                   }
 
                   const geminiData = await geminiResponse.json()
-                  text = geminiData?.candidates?.[0]?.content || ''
+                  text = geminiData?.candidates?.[0]?.content?.parts
+                    ?.map((part) => part?.text || '')
+                    .join('\n')
+                    .trim() || ''
                 } else {
                   const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
                     method: 'POST',
