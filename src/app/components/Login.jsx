@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Activity, Lock, User, AlertCircle } from 'lucide-react';
 
-export function Login({ onLogin, error }) {
+export function Login({ onLogin, error, onShowSignup }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
@@ -81,6 +81,14 @@ export function Login({ onLogin, error }) {
               className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg transition-colors"
             >
               Sign In
+            </button>
+
+            <button
+              type="button"
+              onClick={onShowSignup}
+              className="w-full border border-blue-600 text-blue-600 hover:bg-blue-50 py-3 px-4 rounded-lg transition-colors"
+            >
+              Create Coach Account
             </button>
           </form>
 

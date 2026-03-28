@@ -8,6 +8,8 @@ const mockUsers = [
       username: 'coach',
       role: 'coach',
       name: 'Coach Anderson',
+      sportType: 'Football',
+      coachType: 'Head Coach',
     },
   },
   {
@@ -56,9 +58,69 @@ const mockUsers = [
   },
 ];
 
+const USER_STORAGE_KEY = 'athleteDashboardRegisteredUsers';
+
+function getStoredUsers() {
+  try {
+    const raw = localStorage.getItem(USER_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredUsers(users) {
+  localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(users));
+}
+
+function getAllUsers() {
+  return [...mockUsers, ...getStoredUsers()];
+}
+
 export function authenticateUser(username, password) {
-  const userRecord = mockUsers.find(
+  const userRecord = getAllUsers().find(
     (u) => u.username === username && u.password === password
   );
   return userRecord ? userRecord.user : null;
+}
+
+export function registerUser({ name, username, password, role, sportType, coachType }) {
+  const normalizedUsername = (username || '').trim();
+  const normalizedName = (name || '').trim();
+
+  if (!normalizedUsername || !normalizedName || !password) {
+    return { ok: false, error: 'Name, username, and password are required.' };
+  }
+
+  const exists = getAllUsers().some(
+    (u) => u.username.toLowerCase() === normalizedUsername.toLowerCase()
+  );
+  if (exists) {
+    return { ok: false, error: 'Username already exists. Choose another username.' };
+  }
+
+  if (role === 'coach' && (!sportType || !coachType)) {
+    return { ok: false, error: 'Sport type and coach type are required for coach signup.' };
+  }
+
+  const createdUser = {
+    id: `${role}-${Date.now()}`,
+    username: normalizedUsername,
+    role: role || 'player',
+    name: normalizedName,
+    ...(role === 'coach' ? { sportType, coachType } : {}),
+  };
+
+  const record = {
+    username: normalizedUsername,
+    password,
+    user: createdUser,
+  };
+
+  const stored = getStoredUsers();
+  stored.push(record);
+  saveStoredUsers(stored);
+
+  return { ok: true, user: createdUser };
 }

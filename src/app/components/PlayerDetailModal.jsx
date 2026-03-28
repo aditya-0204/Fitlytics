@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { X, Heart, Activity, TrendingUp, Moon, Droplet, Brain, Zap, Download } from 'lucide-react';
 import { HealthMetricCard } from './HealthMetricCard';
 import { ActivityCard } from './ActivityCard';
@@ -13,7 +14,16 @@ import {
 } from '../data/mockData';
 import jsPDF from 'jspdf';
 
-export function PlayerDetailModal({ player, onClose }) {
+export function PlayerDetailModal({ player, onClose, onUpdatePlayer }) {
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [activityForm, setActivityForm] = useState({
+    type: '',
+    date: new Date().toISOString().split('T')[0],
+    duration: 60,
+    caloriesBurned: 400,
+    intensity: 'medium',
+    notes: '',
+  });
   // Get player-specific data (with fallback to new/additive player payloads)
   const healthMetrics = playerHealthMetrics[player.id] || player.healthMetrics || {
     heartRate: { value: 0, trend: { value: 0, isPositive: true } },
@@ -25,9 +35,9 @@ export function PlayerDetailModal({ player, onClose }) {
     stress: { value: 0, trend: { value: 0, isPositive: true } },
     trainingLoad: { value: 0, trend: { value: 0, isPositive: true } },
   };
-  const activities = playerActivities[player.id] || player.activities || [];
-  const performanceData = playerPerformanceData[player.id] || player.performanceData || [];
-  const riskFactors = playerRiskFactors[player.id] || player.riskFactors || [];
+  const activities = player.activities || playerActivities[player.id] || [];
+  const performanceData = player.performanceData || playerPerformanceData[player.id] || [];
+  const riskFactors = player.riskFactors || playerRiskFactors[player.id] || [];
 
   // Helper function to get trend indicator
   const getTrendIndicator = (trendObj) => {
@@ -395,8 +405,53 @@ export function PlayerDetailModal({ player, onClose }) {
     });
   };
 
-  const handleDownload = () => {
-    generatePDFReport();
+  const handleDownload = async () => {
+    if (isGeneratingReport) {
+      return;
+    }
+    setIsGeneratingReport(true);
+    try {
+      await generatePDFReport();
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
+  const handleAddActivity = () => {
+    if (!activityForm.type.trim()) {
+      return;
+    }
+
+    const newActivity = {
+      id: `activity-${Date.now()}`,
+      type: activityForm.type.trim(),
+      date: activityForm.date,
+      duration: Number(activityForm.duration) || 0,
+      caloriesBurned: Number(activityForm.caloriesBurned) || 0,
+      intensity: activityForm.intensity,
+      notes: activityForm.notes.trim(),
+    };
+
+    const updatedActivities = [newActivity, ...activities].slice(0, 20);
+    const updatedPlayer = {
+      ...player,
+      activities: updatedActivities,
+      stats: {
+        ...(player.stats || {}),
+        activitiesThisWeek: updatedActivities.length,
+      },
+    };
+
+    onUpdatePlayer?.(updatedPlayer);
+    setActivityForm((prev) => ({
+      ...prev,
+      type: '',
+      notes: '',
+      duration: 60,
+      caloriesBurned: 400,
+      intensity: 'medium',
+      date: new Date().toISOString().split('T')[0],
+    }));
   };
 
   return (
@@ -418,11 +473,16 @@ export function PlayerDetailModal({ player, onClose }) {
           <div className="flex items-center gap-2">
             <button
               onClick={handleDownload}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+              disabled={isGeneratingReport}
+              className={`flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-colors ${
+                isGeneratingReport
+                  ? 'bg-blue-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
               title="Download Performance Report"
             >
               <Download className="w-5 h-5" />
-              <span>Download Report</span>
+              <span>{isGeneratingReport ? 'Generating report...' : 'Download Report'}</span>
             </button>
             <button
               onClick={onClose}
@@ -533,10 +593,71 @@ export function PlayerDetailModal({ player, onClose }) {
           {/* Recent Activities */}
           <section>
             <h3 className="mb-4 dark:text-white">Recent Activities</h3>
+            <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-4">
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">Add or update player activity</p>
+              <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                <input
+                  type="text"
+                  value={activityForm.type}
+                  onChange={(e) => setActivityForm((prev) => ({ ...prev, type: e.target.value }))}
+                  className="md:col-span-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                  placeholder="Activity type"
+                />
+                <input
+                  type="date"
+                  value={activityForm.date}
+                  onChange={(e) => setActivityForm((prev) => ({ ...prev, date: e.target.value }))}
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                />
+                <input
+                  type="number"
+                  value={activityForm.duration}
+                  onChange={(e) => setActivityForm((prev) => ({ ...prev, duration: e.target.value }))}
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                  placeholder="Duration"
+                />
+                <select
+                  value={activityForm.intensity}
+                  onChange={(e) => setActivityForm((prev) => ({ ...prev, intensity: e.target.value }))}
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                >
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={handleAddActivity}
+                  className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Add Activity
+                </button>
+                <input
+                  type="number"
+                  value={activityForm.caloriesBurned}
+                  onChange={(e) => setActivityForm((prev) => ({ ...prev, caloriesBurned: e.target.value }))}
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                  placeholder="Calories"
+                />
+                <input
+                  type="text"
+                  value={activityForm.notes}
+                  onChange={(e) => setActivityForm((prev) => ({ ...prev, notes: e.target.value }))}
+                  className="md:col-span-5 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                  placeholder="Notes (optional)"
+                />
+              </div>
+            </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {activities.map((activity) => (
-                <ActivityCard key={activity.id} activity={activity} />
-              ))}
+              {activities.length > 0 ? (
+                activities.map((activity) => (
+                  <ActivityCard key={activity.id} activity={activity} />
+                ))
+              ) : (
+                <div className="bg-white dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-sm text-gray-600 dark:text-gray-300">
+                  No activities yet. Add one above.
+                </div>
+              )}
             </div>
           </section>
         </div>

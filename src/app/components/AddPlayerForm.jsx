@@ -1,7 +1,22 @@
 import React, { useState } from 'react';
 import { X, User, Mail, Phone, MapPin, Calendar, Activity, Heart, Moon, Zap, Target } from 'lucide-react';
 
-export function AddPlayerForm({ onClose, onAddPlayer }) {
+const PLAYER_TYPES_BY_SPORT = {
+  Cricket: ['Batter', 'Opening Batter', 'Middle-Order Batter', 'All-Rounder', 'Fast Bowler', 'Medium Pacer', 'Spin Bowler', 'Wicketkeeper'],
+  Football: ['Forward', 'Midfielder', 'Defender', 'Goalkeeper', 'Striker', 'Winger', 'Center Back', 'Full Back'],
+  Hockey: ['Forward', 'Midfielder', 'Defender', 'Goalkeeper', 'Drag Flicker'],
+  Basketball: ['Point Guard', 'Shooting Guard', 'Small Forward', 'Power Forward', 'Center'],
+  Volleyball: ['Setter', 'Outside Hitter', 'Opposite Hitter', 'Middle Blocker', 'Libero'],
+  Tennis: ['Singles Specialist', 'Doubles Specialist', 'Baseline Player', 'All-Court Player'],
+  Badminton: ['Singles Player', 'Doubles Player', 'Mixed Doubles Specialist', 'All-Round Player'],
+  Athletics: ['Sprinter', 'Middle-Distance Runner', 'Long-Distance Runner', 'Jumper', 'Thrower', 'Decathlete'],
+  Wrestling: ['Freestyle Wrestler', 'Greco-Roman Wrestler', 'Lightweight Wrestler', 'Heavyweight Wrestler'],
+  Swimming: ['Freestyle Swimmer', 'Backstroke Swimmer', 'Breaststroke Swimmer', 'Butterfly Swimmer', 'Medley Swimmer'],
+  Kabaddi: ['Raider', 'Defender', 'All-Rounder'],
+  'Table Tennis': ['Attacking Player', 'Defensive Player', 'All-Round Player'],
+};
+
+export function AddPlayerForm({ onClose, onAddPlayer, coachSportType = 'Football' }) {
   const [formData, setFormData] = useState({
     // Basic Information
     name: '',
@@ -38,11 +53,19 @@ export function AddPlayerForm({ onClose, onAddPlayer }) {
 
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [recentActivities, setRecentActivities] = useState([
+    {
+      id: `new-activity-${Date.now()}`,
+      type: '',
+      date: new Date().toISOString().split('T')[0],
+      duration: 60,
+      caloriesBurned: 400,
+      intensity: 'medium',
+      notes: '',
+    },
+  ]);
 
-  const positions = [
-    'Forward', 'Midfielder', 'Defender', 'Goalkeeper',
-    'Striker', 'Winger', 'Center Back', 'Full Back'
-  ];
+  const positions = PLAYER_TYPES_BY_SPORT[coachSportType] || PLAYER_TYPES_BY_SPORT.Football;
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -50,6 +73,33 @@ export function AddPlayerForm({ onClose, onAddPlayer }) {
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: '' }));
     }
+  };
+
+  const addRecentActivityRow = () => {
+    setRecentActivities((prev) => [
+      ...prev,
+      {
+        id: `new-activity-${Date.now()}-${prev.length}`,
+        type: '',
+        date: new Date().toISOString().split('T')[0],
+        duration: 60,
+        caloriesBurned: 400,
+        intensity: 'medium',
+        notes: '',
+      },
+    ]);
+  };
+
+  const updateRecentActivity = (id, field, value) => {
+    setRecentActivities((prev) =>
+      prev.map((activity) =>
+        activity.id === id ? { ...activity, [field]: value } : activity
+      )
+    );
+  };
+
+  const removeRecentActivityRow = (id) => {
+    setRecentActivities((prev) => prev.filter((activity) => activity.id !== id));
   };
 
   const validateForm = () => {
@@ -111,12 +161,25 @@ export function AddPlayerForm({ onClose, onAddPlayer }) {
         return days.map(day => ({ day, minutes: Math.floor(30 + Math.random() * 90) }));
       };
 
+      const normalizedRecentActivities = recentActivities
+        .filter((activity) => activity.type.trim().length > 0)
+        .map((activity, idx) => ({
+          id: `activity-${newId}-${idx + 1}`,
+          type: activity.type.trim(),
+          date: activity.date,
+          duration: Number(activity.duration) || 0,
+          caloriesBurned: Number(activity.caloriesBurned) || 0,
+          intensity: activity.intensity || 'medium',
+          notes: activity.notes?.trim() || '',
+        }));
+
       const newPlayer = {
         id: newId,
         name: formData.name,
         email: formData.email,
         phone: formData.phone,
         position: formData.position,
+        sportType: coachSportType,
         dateOfBirth: formData.dateOfBirth,
         height: formData.height ? parseFloat(formData.height) : null,
         weight: formData.weight ? parseFloat(formData.weight) : null,
@@ -137,7 +200,7 @@ export function AddPlayerForm({ onClose, onAddPlayer }) {
         // Stats for team overview
         stats: {
           healthScore: formData.recoveryScore,
-          activitiesThisWeek: 0,
+          activitiesThisWeek: normalizedRecentActivities.length,
           avgHeartRate: formData.restingHeartRate,
           performanceScore: formData.performanceScore,
         },
@@ -149,6 +212,7 @@ export function AddPlayerForm({ onClose, onAddPlayer }) {
         weeklyActivity: generateWeeklyActivity(),
         riskFactors: [],
         wearableData: [],
+        activities: normalizedRecentActivities,
 
         meta: {
           experienceLevel: formData.experienceLevel,
@@ -211,6 +275,9 @@ export function AddPlayerForm({ onClose, onAddPlayer }) {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Position *
                 </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Sport: {coachSportType}
+                </p>
                 <select
                   value={formData.position}
                   onChange={(e) => handleInputChange('position', e.target.value)}
@@ -524,6 +591,80 @@ export function AddPlayerForm({ onClose, onAddPlayer }) {
                   max="100"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* Recent Activities */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                <Target className="w-5 h-5" />
+                Recent Activities (Optional)
+              </h3>
+              <button
+                type="button"
+                onClick={addRecentActivityRow}
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Add Activity Row
+              </button>
+            </div>
+            <div className="space-y-3">
+              {recentActivities.map((activity) => (
+                <div key={activity.id} className="grid grid-cols-1 md:grid-cols-7 gap-2 p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+                  <input
+                    type="text"
+                    value={activity.type}
+                    onChange={(e) => updateRecentActivity(activity.id, 'type', e.target.value)}
+                    className="md:col-span-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                    placeholder="Activity type"
+                  />
+                  <input
+                    type="date"
+                    value={activity.date}
+                    onChange={(e) => updateRecentActivity(activity.id, 'date', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                  />
+                  <input
+                    type="number"
+                    value={activity.duration}
+                    onChange={(e) => updateRecentActivity(activity.id, 'duration', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                    placeholder="Duration"
+                  />
+                  <input
+                    type="number"
+                    value={activity.caloriesBurned}
+                    onChange={(e) => updateRecentActivity(activity.id, 'caloriesBurned', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                    placeholder="Calories"
+                  />
+                  <select
+                    value={activity.intensity}
+                    onChange={(e) => updateRecentActivity(activity.id, 'intensity', e.target.value)}
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => removeRecentActivityRow(activity.id)}
+                    className="px-3 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    disabled={recentActivities.length === 1}
+                  >
+                    Remove
+                  </button>
+                  <input
+                    type="text"
+                    value={activity.notes}
+                    onChange={(e) => updateRecentActivity(activity.id, 'notes', e.target.value)}
+                    className="md:col-span-7 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white"
+                    placeholder="Notes (optional)"
+                  />
+                </div>
+              ))}
             </div>
           </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Activity, Heart, TrendingUp, Users, ChartBar, Moon, Droplet, Brain, Zap, Sun, LogOut, Plus } from 'lucide-react';
 import { HealthMetricCard } from './components/HealthMetricCard';
 import { ActivityCard } from './components/ActivityCard';
@@ -11,8 +11,9 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Dashboard } from './components/Dashboard';
 import { AIInsights } from './components/AIInsights';
 import { Login } from './components/Login';
+import { Signup } from './components/Signup';
 import { AddPlayerForm } from './components/AddPlayerForm';
-import { authenticateUser } from './utils/mockAuth';
+import { authenticateUser, registerUser } from './utils/mockAuth';
 import {
   playerHealthMetrics,
   playerActivities,
@@ -21,22 +22,41 @@ import {
   playerRiskFactors,
   playerWearableData,
   teamPlayers,
-  teamPerformanceData,
 } from './data/mockData';
 import { cleanData, calculateTrainingLoad } from './utils/dataProcessing';
 import { calculateAcuteLoad, calculateChronicLoad, calculateACWR } from './utils/featureEngineering';
 import { calculateBaseline, calculatePerformanceDrop } from './utils/performanceAnalysis';
 
+const getCoachTeamStorageKey = (coachUser) => `athleteDashboardTeamPlayers:${coachUser?.id || coachUser?.username || 'coach'}`;
+
+const loadCoachTeamPlayers = (coachUser) => {
+  if (!coachUser) {
+    return teamPlayers;
+  }
+
+  try {
+    const key = getCoachTeamStorageKey(coachUser);
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch {
+    return [];
+  }
+
+  // Keep demo coach experience unchanged; new signed-up coaches start empty.
+  return coachUser.username === 'coach' ? teamPlayers : [];
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [loginError, setLoginError] = useState('');
+  const [showSignup, setShowSignup] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [showAddPlayerForm, setShowAddPlayerForm] = useState(false);
-  const [currentTeamPlayers, setCurrentTeamPlayers] = useState(() => {
-    const stored = localStorage.getItem('athleteDashboardTeamPlayers');
-    return stored ? JSON.parse(stored) : teamPlayers;
-  });
+  const [currentTeamPlayers, setCurrentTeamPlayers] = useState(teamPlayers);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('athleteDashboardUser');
@@ -46,8 +66,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('athleteDashboardTeamPlayers', JSON.stringify(currentTeamPlayers));
-  }, [currentTeamPlayers]);
+    if (!user) {
+      return;
+    }
+
+    if (user.role === 'coach') {
+      setCurrentTeamPlayers(loadCoachTeamPlayers(user));
+      return;
+    }
+
+    // Players use the seeded dataset + potential default fallback.
+    setCurrentTeamPlayers(teamPlayers);
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || user.role !== 'coach') {
+      return;
+    }
+    localStorage.setItem(getCoachTeamStorageKey(user), JSON.stringify(currentTeamPlayers));
+  }, [currentTeamPlayers, user]);
 
   const handleLogin = (username, password) => {
     const authenticatedUser = authenticateUser(username, password);
@@ -57,6 +94,18 @@ export default function App() {
       setLoginError('');
     } else {
       setLoginError('Invalid username or password');
+    }
+  };
+
+  const handleSignup = (signupData) => {
+    const result = registerUser(signupData);
+    if (result.ok) {
+      setUser(result.user);
+      localStorage.setItem('athleteDashboardUser', JSON.stringify(result.user));
+      setLoginError('');
+      setShowSignup(false);
+    } else {
+      setLoginError(result.error || 'Unable to create account');
     }
   };
 
@@ -73,11 +122,36 @@ export default function App() {
     // In a real app, this would also update the backend
   };
 
+  const handleUpdatePlayer = (updatedPlayer) => {
+    setCurrentTeamPlayers((prev) =>
+      prev.map((p) => (p.id === updatedPlayer.id ? updatedPlayer : p))
+    );
+    setSelectedPlayer((prev) => (prev && prev.id === updatedPlayer.id ? updatedPlayer : prev));
+  };
+
   // If not authenticated, show login
   if (!user) {
     return (
       <div className={darkMode ? 'dark' : ''}>
-        <Login onLogin={handleLogin} error={loginError} />
+        {showSignup ? (
+          <Signup
+            onSignup={handleSignup}
+            onShowLogin={() => {
+              setShowSignup(false);
+              setLoginError('');
+            }}
+            error={loginError}
+          />
+        ) : (
+          <Login
+            onLogin={handleLogin}
+            error={loginError}
+            onShowSignup={() => {
+              setShowSignup(true);
+              setLoginError('');
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -105,6 +179,53 @@ export default function App() {
   const wearableData = playerId
     ? playerWearableData[playerId] || currentUserPlayer?.wearableData || []
     : [];
+
+  const computedTeamPerformanceData = useMemo(() => {
+    const byDate = new Map();
+
+    currentTeamPlayers.forEach((player) => {
+      const sourceData = Array.isArray(player.performanceData) && player.performanceData.length > 0
+        ? player.performanceData
+        : (playerPerformanceData[player.id] || []);
+
+      if (sourceData.length > 0) {
+        sourceData.forEach((entry) => {
+          const date = entry?.date;
+          const score = Number(entry?.score);
+          if (!date || Number.isNaN(score)) {
+            return;
+          }
+          const existing = byDate.get(date) || { total: 0, count: 0 };
+          existing.total += score;
+          existing.count += 1;
+          byDate.set(date, existing);
+        });
+      } else if (player?.stats?.performanceScore !== undefined) {
+        const today = new Date().toISOString().split('T')[0];
+        const score = Number(player.stats.performanceScore);
+        if (!Number.isNaN(score)) {
+          const existing = byDate.get(today) || { total: 0, count: 0 };
+          existing.total += score;
+          existing.count += 1;
+          byDate.set(today, existing);
+        }
+      }
+    });
+
+    return Array.from(byDate.entries())
+      .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
+      .map(([date, data]) => ({
+        date,
+        score: Math.round(data.total / data.count),
+      }));
+  }, [currentTeamPlayers]);
+  const avgHealthScore = currentTeamPlayers.length > 0
+    ? Math.round(currentTeamPlayers.reduce((sum, player) => sum + (player.stats?.healthScore || 0), 0) / currentTeamPlayers.length)
+    : 0;
+  const avgPerformanceScore = currentTeamPlayers.length > 0
+    ? Math.round(currentTeamPlayers.reduce((sum, player) => sum + (player.stats?.performanceScore || 0), 0) / currentTeamPlayers.length)
+    : 0;
+  const activitiesTotal = currentTeamPlayers.reduce((sum, player) => sum + (player.stats?.activitiesThisWeek || 0), 0);
   const processedWearable = calculateTrainingLoad(cleanData(wearableData));
   const acute = calculateAcuteLoad(processedWearable, 7);
   const chronic = calculateChronicLoad(processedWearable, 28);
@@ -348,7 +469,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="text-sm text-gray-600 dark:text-gray-400">Avg Health Score</p>
-                      <p className="text-2xl dark:text-white">{Math.round(currentTeamPlayers.reduce((sum, player) => sum + player.stats.healthScore, 0) / currentTeamPlayers.length)}/100</p>
+                      <p className="text-2xl dark:text-white">{avgHealthScore}/100</p>
                     </div>
                   </div>
                 </div>
@@ -359,7 +480,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="text-sm text-gray-600 dark:text-gray-400">Activities Today</p>
-                      <p className="text-2xl dark:text-white">{currentTeamPlayers.reduce((sum, player) => sum + player.stats.activitiesThisWeek, 0)}</p>
+                      <p className="text-2xl dark:text-white">{activitiesTotal}</p>
                     </div>
                   </div>
                 </div>
@@ -370,7 +491,7 @@ export default function App() {
                     </div>
                     <div>
                       <p className="text-sm text-gray-600 dark:text-gray-400">Avg Performance</p>
-                      <p className="text-2xl dark:text-white">{Math.round(currentTeamPlayers.reduce((sum, player) => sum + player.stats.performanceScore, 0) / currentTeamPlayers.length)}/100</p>
+                      <p className="text-2xl dark:text-white">{avgPerformanceScore}/100</p>
                     </div>
                   </div>
                 </div>
@@ -383,14 +504,22 @@ export default function App() {
                 <ChartBar className="w-5 h-5 text-gray-700 dark:text-gray-300" />
                 <h2 className="dark:text-white">Team Performance Trends</h2>
               </div>
-              <PerformanceChart
-                data={teamPerformanceData}
-                type="line"
-                title="Average Team Performance Score"
-                dataKey="score"
-                xAxisKey="date"
-                color="#8b5cf6"
-              />
+              {currentTeamPlayers.length === 0 ? (
+                <div className="bg-white dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Team performance trend will appear after you add players and activity data.
+                  </p>
+                </div>
+              ) : (
+                <PerformanceChart
+                  data={computedTeamPerformanceData}
+                  type="line"
+                  title="Average Team Performance Score"
+                  dataKey="score"
+                  xAxisKey="date"
+                  color="#8b5cf6"
+                />
+              )}
             </section>
 
             {/* Player Cards */}
@@ -399,15 +528,31 @@ export default function App() {
                 <Users className="w-5 h-5 text-gray-700 dark:text-gray-300" />
                 <h2 className="dark:text-white">Player Health Status</h2>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {currentTeamPlayers.map((player) => (
-                  <PlayerCard 
-                    key={player.id} 
-                    player={player}
-                    onClick={() => setSelectedPlayer(player)}
-                  />
-                ))}
-              </div>
+              {currentTeamPlayers.length === 0 ? (
+                <div className="bg-white dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center">
+                  <h3 className="text-lg dark:text-white mb-2">No players added yet</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                    Start by adding your first player to build your team overview.
+                  </p>
+                  <button
+                    onClick={() => setShowAddPlayerForm(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Your First Player
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {currentTeamPlayers.map((player) => (
+                    <PlayerCard 
+                      key={player.id} 
+                      player={player}
+                      onClick={() => setSelectedPlayer(player)}
+                    />
+                  ))}
+                </div>
+              )}
             </section>
           </>
         )}
@@ -418,6 +563,7 @@ export default function App() {
         <PlayerDetailModal 
           player={selectedPlayer} 
           onClose={() => setSelectedPlayer(null)} 
+          onUpdatePlayer={handleUpdatePlayer}
         />
       )}
 
@@ -426,6 +572,7 @@ export default function App() {
         <AddPlayerForm
           onClose={() => setShowAddPlayerForm(false)}
           onAddPlayer={handleAddPlayer}
+          coachSportType={user?.sportType || 'Football'}
         />
       )}
     </ErrorBoundary>
